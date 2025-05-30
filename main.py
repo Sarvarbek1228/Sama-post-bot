@@ -76,6 +76,9 @@ def post_photo():
         print(f"Xatolik: {e}")
 
 scheduler = BlockingScheduler()
-scheduler.add_job(post_photo, 'cron', hour=18, minute=30)
+from pytz import timezone
+
+tz = timezone('Asia/Tashkent')
+scheduler.add_job(post_photo, 'cron', hour=18, minute=30, timezone=tz)
 print("Bot ishga tushdi. Har kuni 18:30 da post yuboriladi.")
 scheduler.start()
