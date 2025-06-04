@@ -1,45 +1,42 @@
-import logging
-import json
 import os
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
+import json
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackContext, MessageHandler, Filters
 
-# 🔧 Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# === Sozlamalar ===
+TOKEN = "7633206691:AAGFxRSHrsf99Png8nYtBKvBUyEZNo0xmX0"
+DATA_FOLDER = "data"
 
-# 📍 Holatlar
-CHOOSE_BOOK, CHOOSE_UNIT, SHOW_WORDS, START_QUIZ, QUIZ, REVIEW_MISTAKES, REINFORCE = range(7)
-
-# 📘 Global o'zgaruvchilar
-USER_DATA = {}
-BOOKS = ["Book 1", "Book 2", "Book 3", "Book 4"]
-
+# === Boshlang‘ich menyu ===
 def start(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    USER_DATA[user_id] = {}
+    books = sorted(os.listdir(DATA_FOLDER))
+    keyboard = [[book] for book in books]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    update.message.reply_text("📚 Kitobni tanlang:", reply_markup=reply_markup)
 
-    reply_keyboard = [[book] for book in BOOKS]
-    update.message.reply_text(
-        "🇬🇧 *English Vocabulary Bot* ga xush kelibsiz!\n\n"
-        "Iltimos, boshlash uchun kitobni tanlang:",
-        parse_mode='Markdown',
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-    )
-    return CHOOSE_BOOK
+# === Kitob tanlanganda ===
+def handle_book(update: Update, context: CallbackContext):
+    selected_book = update.message.text
+    book_path = os.path.join(DATA_FOLDER, selected_book)
 
-def choose_book(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    book = update.message.text
-    if book not in BOOKS:
-        update.message.reply_text("Iltimos, ro‘yxatdan kitob tanlang.")
-        return CHOOSE_BOOK
+    if not os.path.isdir(book_path):
+        update.message.reply_text("❌ Noto‘g‘ri tanlov. Iltimos, menyudan tanlang.")
+        return
 
-    USER_DATA[user_id]['book'] = book
-    unit_list = [f"Unit {i}" for i in range(1, 31)]  # 30 ta unit
-    reply_keyboard = [[unit] for unit in unit_list]
+    units = sorted(os.listdir(book_path))
+    keyboard = [[unit.replace(".json", "")] for unit in units]
+    context.user_data["selected_book"] = selected_book
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    update.message.reply_text(f"📖 {selected_book} ichidagi unitni tanlang:", reply_markup=reply_markup)
+    def main():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-    update.message.reply_text(
-        f"{book} tanlandi.\n\nEndi esa unitni tanlang:",
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-    )
-    return CHOOSE_UNIT
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_book))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
