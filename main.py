@@ -1,83 +1,125 @@
-import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, CallbackQueryHandler
-import httpx
+import json
+import os
 import asyncio
+from datetime import datetime
+from pytz import timezone
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+# ==== Asosiy sozlamalar ====
+BOT_TOKEN = "7571307271:AAFB103UF5aDX_vV83xKUOVHHM3kePNiLCI"
+CHANNEL_ID = "@kiyim_para_kiyim"
+GROUP_IDS = [-4883073648, -4982748525]  # Futbolka va Hudi guruhlari
+MEDIA_FILE = "media_store.json"
 
-BOT_TOKEN = "8024656591:AAHG9PWLQkVnnSGtyhnKPqIEbBQqV63wG7U"
+# ==== Media saqlash ====
+def load_media():
+    if os.path.exists(MEDIA_FILE):
+        with open(MEDIA_FILE, "r") as f:
+            return json.load(f)
+    return {group_id: {"photos": [], "videos": [], "index": 0} for group_id in GROUP_IDS}
 
-CHANNELS = {
-    "Andijon": "@Andijon_nomoz_vaqti",
-    "Namangan": "@Namangan_nomoz",
-    "Toshkent": "@Toshkent_nomoz",
-    "Fargona": "@fargona_nomoz_vaqtlari"
-}
+def save_media(media):
+    with open(MEDIA_FILE, "w") as f:
+        json.dump(media, f)
 
-VILOYAT_COORDINATES = {
-    "Andijon": (40.7829, 72.3442),
-    "Namangan": (41.0000, 71.6667),
-    "Toshkent": (41.2995, 69.2401),
-    "Fargona": (40.3780, 71.7843),
-}
+media_storage = load_media()
 
-CHANNEL_USERNAMES = "\n".join(CHANNELS.values())
+def add_media(group_id, media_type, file_id):
+    if group_id not in media_storage:
+        media_storage[group_id] = {"photos": [], "videos": [], "index": 0}
+    media_storage[group_id][media_type + "s"].append(file_id)
+    save_media(media_storage)
 
-async def get_prayer_times(lat: float, lon: float):
-    url = f"http://api.aladhan.com/v1/timings?latitude={lat}&longitude={lon}&method=2"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url)
-        data = resp.json()
-        if data["code"] != 200:
-            raise Exception("Namoz vaqtlarini olishda xatolik")
-        return data["data"]["timings"]
+def get_next_media(group_id):
+    group_data = media_storage.get(group_id, {"photos": [], "videos": [], "index": 0})
+    combined = [{"type": "photo", "file_id": f} for f in group_data.get("photos", [])] + \
+               [{"type": "video", "file_id": f} for f in group_data.get("videos", [])]
+    if not combined:
+        return None
+    index = group_data.get("index", 0) % len(combined)
+    media_storage[group_id]["index"] = index + 1
+    save_media(media_storage)
+    return combined[index]
 
-def format_prayer_times(viloyat: str, timings: dict) -> str:
-    text = f"🕌 Namoz vaqtlari — {viloyat}\n\n"
-    text += f"Bomdod: {timings.get('Fajr')}\n"
-    text += f"Quyosh: {timings.get('Sunrise')}\n"
-    text += f"Peshin: {timings.get('Dhuhr')}\n"
-    text += f"Asr: {timings.get('Asr')}\n"
-    text += f"Shom: {timings.get('Maghrib')}\n"
-    text += f"Xufton: {timings.get('Isha')}\n\n"
-    text += CHANNEL_USERNAMES
-    return text
+# ==== Mediani qabul qilish ====
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    group_id = update.effective_chat.id
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        add_media(group_id, "photo", file_id)
+        print(f"{group_id} dan RASM olindi.")
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        add_media(group_id, "video", file_id)
+        print(f"{group_id} dan VIDEO olindi.")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("Namoz vaqtini yuborish", callback_data='send_prayer_times')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "Assalomu alaykum!\nNamoz vaqtlarini olish uchun quyidagi tugmani bosing.",
-        reply_markup=reply_markup
+# ==== Kanalga yuborish ====
+async def post_to_channel():
+    FUTBOLKA_TEXT = (
+        "👕 FUTBOLKA KO'YLAKLAR\n\n"
+        "🖤 Ranglar: Oq | Qora\n"
+        "📏 Modellar: Oversize | Oddiy\n\n"
+        "💸 Narxlar:\n"
+        "• Oddiy — 100 000 so‘m\n"
+        "• Oversize — 190 000 so‘m\n\n"
+        "🎨 Siz istagan dizaynda tayyorlaymiz\n"
+        "🚚 O‘zbekiston bo‘ylab 12 viloyatga pochta orqali yetkazib beramiz\n\n"
+        "✨ SAMA PRINT — mehr va xotiralarni muhrlab beruvchi manzil."
     )
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == 'send_prayer_times':
-        bot = context.bot
-        # 4 ta kanalga namoz vaqtlarini alohida yuborish
-        for viloyat, channel in CHANNELS.items():
-            lat, lon = VILOYAT_COORDINATES[viloyat]
-            try:
-                timings = await get_prayer_times(lat, lon)
-                msg = format_prayer_times(viloyat, timings)
-                await bot.send_message(chat_id=channel, text=msg)
-                logger.info(f"{viloyat} uchun namoz vaqtlari kanalga yuborildi.")
-            except Exception as e:
-                logger.error(f"{viloyat} uchun namoz vaqtini olishda xatolik: {e}")
-        await query.edit_message_text("Namoz vaqtlarini barcha kanallarga yubordim ✅")
+    HUDI_TEXT = (
+        "🧥 HUDILAR\n\n"
+        "🖤 Ranglar: Oq | Qora\n"
+        "📏 Modellar: Oversize | Oddiy\n\n"
+        "💸 Narxlar:\n"
+        "• Oddiy — 190 000 so‘m\n"
+        "• Oversize — 240 000 so‘m\n\n"
+        "🎨 Siz istagan dizaynda tayyorlaymiz\n"
+        "🚚 O‘zbekiston bo‘ylab 12 viloyatga pochta orqali yetkazib beramiz\n\n"
+        "✨ SAMA PRINT — mehr va xotiralarni muhrlab beruvchi manzil."
+    )
 
-if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🛒 Sotib olish", url="https://t.me/sama_pr7nt"),
+            InlineKeyboardButton("📸 Instagramdan kuzatish", url="https://instagram.com/sama_pr1nt")
+        ]
+    ])
 
-    print("Bot ishga tushdi.")
-    app.run_polling()
+    bot = Bot(BOT_TOKEN)
+
+    for group_id in GROUP_IDS:
+        media = get_next_media(group_id)
+        if not media:
+            print(f"{group_id} dan media topilmadi.")
+            continue
+        try:
+            caption = FUTBOLKA_TEXT if group_id == -4883073648 else HUDI_TEXT
+            if media['type'] == 'photo':
+                await bot.send_photo(chat_id=CHANNEL_ID, photo=media['file_id'], caption=caption, reply_markup=keyboard)
+                print(f"{group_id} dan kanalga RASM yuborildi.")
+            elif media['type'] == 'video':
+                await bot.send_video(chat_id=CHANNEL_ID, video=media['file_id'], caption=caption, reply_markup=keyboard)
+                print(f"{group_id} dan kanalga VIDEO yuborildi.")
+        except Exception as e:
+            print(f"{group_id} dan media yuborishda xatolik: {e}")
+
+# ==== Botni ishga tushirish ====
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(MessageHandler(filters.Chat(GROUP_IDS) & (filters.PHOTO | filters.VIDEO), handle_media))
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(post_to_channel, 'cron', hour=13, minute=2, timezone=timezone('Asia/Tashkent'))
+    scheduler.add_job(post_to_channel, 'cron', hour=18, minute=42, timezone=timezone('Asia/Tashkent'))
+    scheduler.start()
+
+    print("🤖 Bot Railway'da ishga tushdi.")
+    await app.run_polling()
+
+if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
+    asyncio.run(main())
