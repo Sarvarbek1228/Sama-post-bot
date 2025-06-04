@@ -1,5 +1,14 @@
 [
-    {"english": "afraid", "uzbek": "qo‘rqmoq"},
-    {"english": "agree", "uzbek": "rozi bo‘lmoq"},
-    {"english": "angry", "uzbek": "jahli chiqqan"}
+  {
+    "english": "apple",
+    "uzbek": "olma"
+  },
+  {
+    "english": "book",
+    "uzbek": "kitob"
+  },
+  {
+    "english": "car",
+    "uzbek": "mashina"
+  }
 ]
