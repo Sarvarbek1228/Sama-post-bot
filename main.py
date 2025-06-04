@@ -5,7 +5,7 @@ import json
 TOKEN = "7633206691:AAGFxRSHrsf99Png8nYtBKvBUyEZNo0xmX0"
 
 # JSON fayldan so'zlarni yuklaymiz
-with open("data/book1/unit1.json", "r", encoding="utf-8") as f:
+with open("data/book 1/unit1.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 # Har bir foydalanuvchining holati
